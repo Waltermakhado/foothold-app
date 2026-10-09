@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Build in development mode to emit sourcemaps.
+npm run build -- --mode development

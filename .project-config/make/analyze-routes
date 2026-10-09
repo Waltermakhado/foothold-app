@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Route analysis is not configured for this project."

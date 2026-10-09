@@ -1,0 +1,10 @@
+{
+  "description": "Track your job applications effortlessly with a mobile-first app that organizes statuses, company details, and interview notes for job seekers.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
