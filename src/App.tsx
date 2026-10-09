@@ -32,6 +32,21 @@ const SESSION_USERNAME_KEY = "foothold-username"
 const RETURN_TO_KEY = "foothold-return-to"
 const emptyDatabase: Database = { users: [], jobs: [] }
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001"
+const APP_BASE_PATH =
+  import.meta.env.BASE_URL === "/"
+    ? ""
+    : import.meta.env.BASE_URL.replace(/\/$/, "")
+const IS_STATIC_PREVIEW = Boolean(APP_BASE_PATH)
+
+function appPath(path: string): string {
+  return `${APP_BASE_PATH}${path.startsWith("/") ? path : `/${path}`}`
+}
+
+function getAppRoute(pathname: string): string {
+  if (!APP_BASE_PATH) return pathname
+  const route = pathname.slice(APP_BASE_PATH.length)
+  return route.startsWith("/") ? route : route ? `/${route}` : "/"
+}
 
 async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
@@ -191,7 +206,7 @@ function Logo({ light = false }: { light?: boolean }) {
 }
 
 function go(path: string) {
-  window.history.pushState({}, "", path)
+  window.history.pushState({}, "", appPath(path))
   window.dispatchEvent(new PopStateEvent("popstate"))
   window.scrollTo({ top: 0, behavior: "smooth" })
 }
@@ -449,6 +464,30 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  if (IS_STATIC_PREVIEW) {
+    return (
+      <div className="page auth-page">
+        <Header loggedIn={false} />
+        <main id="main" className="auth-main">
+          <div className="auth-form-pane">
+            <div className="auth-intro">
+              <span className="auth-icon">
+                <Icon name="folder" size={27} />
+              </span>
+              <span className="auth-kicker">Static website preview</span>
+              <h1>Online accounts aren’t available yet</h1>
+              <p>
+                Sign-in and saved applications need an API that isn’t hosted
+                with this preview. Follow the setup instructions in the
+                project README to run Foothold locally.
+              </p>
+              <Button onClick={() => go("/")}>Back to Foothold</Button>
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -1326,15 +1365,15 @@ function Redirect({ to, remember }: { to: string; remember?: string }) {
     if (remember) sessionStorage.setItem(RETURN_TO_KEY, remember)
     // A full replace is intentional here: on a direct protected-page load,
     // child effects run before App has attached its history listener.
-    window.location.replace(to)
+    window.location.replace(appPath(to))
   }, [remember, to])
   return null
 }
 
 export default function App() {
-  const [route, setRoute] = useState(window.location.pathname)
+  const [route, setRoute] = useState(getAppRoute(window.location.pathname))
   const [database, setDatabase] = useState<Database>(emptyDatabase)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!IS_STATIC_PREVIEW)
   const [apiError, setApiError] = useState("")
   const refreshDatabase = async () => {
     setLoading(true)
@@ -1349,10 +1388,10 @@ export default function App() {
   }
   useEffect(() => {
     const update = () => {
-      setRoute(window.location.pathname)
-      void refreshDatabase()
+      setRoute(getAppRoute(window.location.pathname))
+      if (!IS_STATIC_PREVIEW) void refreshDatabase()
     }
-    void refreshDatabase()
+    if (!IS_STATIC_PREVIEW) void refreshDatabase()
     window.addEventListener("popstate", update)
     return () => window.removeEventListener("popstate", update)
   }, [])
