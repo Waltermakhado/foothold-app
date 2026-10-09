@@ -4,7 +4,6 @@ type Status = "Applied" | "Interviewed" | "Rejected"
 type User = {
   id: number
   username: string
-  password: string
 }
 type Job = {
   id: number
@@ -27,16 +26,47 @@ type Database = {
   jobs: Job[]
 }
 
-const SESSION_KEY = "foothold-user-id"
+type JobPayload = Omit<Job, "id" | "userId">
+
+function toJobPayload({
+  company,
+  role,
+  status,
+  dateApplied,
+  duties,
+  address,
+  contactEmail,
+  contactPhone,
+  website,
+  requirements,
+  notes,
+}: Job): JobPayload {
+  return {
+    company,
+    role,
+    status,
+    dateApplied,
+    duties,
+    address,
+    contactEmail,
+    contactPhone,
+    website,
+    requirements,
+    notes,
+  }
+}
+
+const SESSION_KEY = "foothold-access-token"
 const SESSION_USERNAME_KEY = "foothold-username"
 const RETURN_TO_KEY = "foothold-return-to"
 const emptyDatabase: Database = { users: [], jobs: [] }
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001"
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:3001" : "")
 const APP_BASE_PATH =
   import.meta.env.BASE_URL === "/"
     ? ""
     : import.meta.env.BASE_URL.replace(/\/$/, "")
-const IS_STATIC_PREVIEW = Boolean(APP_BASE_PATH)
 
 function appPath(path: string): string {
   return `${APP_BASE_PATH}${path.startsWith("/") ? path : `/${path}`}`
@@ -48,34 +78,53 @@ function getAppRoute(pathname: string): string {
   return route.startsWith("/") ? route : route ? `/${route}` : "/"
 }
 
+class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = "ApiRequestError"
+  }
+}
+
 async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  if (!API_URL) {
+    throw new Error(
+      "The hosted API is not configured yet. Please try again later.",
+    )
+  }
+  const token = localStorage.getItem(SESSION_KEY)
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options?.headers,
+    },
   })
-  if (!response.ok) throw new Error(`API request failed (${response.status}).`)
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null
+    throw new ApiRequestError(
+      payload?.error || `API request failed (${response.status}).`,
+      response.status,
+    )
+  }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
 async function readDatabase(): Promise<Database> {
-  const [users, jobs] = await Promise.all([
-    apiRequest<User[]>("/users"),
-    apiRequest<Job[]>("/jobs"),
-  ])
-  return { users, jobs }
-}
-
-function getSessionUser(database: Database): User | null {
-  const userId = Number(localStorage.getItem(SESSION_KEY))
-  if (!userId) return null
-  return database.users.find((user) => user.id === userId) || null
+  const jobs = await apiRequest<Job[]>("/jobs")
+  return { users: [], jobs }
 }
 
 function endSession() {
   localStorage.removeItem(SESSION_KEY)
   localStorage.removeItem(SESSION_USERNAME_KEY)
-  go("/")
+  window.location.assign(appPath("/"))
 }
 
 const statusIcons: Record<Status, string> = {
@@ -464,30 +513,6 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  if (IS_STATIC_PREVIEW) {
-    return (
-      <div className="page auth-page">
-        <Header loggedIn={false} />
-        <main id="main" className="auth-main">
-          <div className="auth-form-pane">
-            <div className="auth-intro">
-              <span className="auth-icon">
-                <Icon name="folder" size={27} />
-              </span>
-              <span className="auth-kicker">Static website preview</span>
-              <h1>Online accounts aren’t available yet</h1>
-              <p>
-                Sign-in and saved applications need an API that isn’t hosted
-                with this preview. Follow the setup instructions in the
-                project README to run Foothold locally.
-              </p>
-              <Button onClick={() => go("/")}>Back to Foothold</Button>
-            </div>
-          </div>
-        </main>
-      </div>
-    )
-  }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -509,40 +534,24 @@ function AuthPage({ mode }: { mode: "register" | "login" }) {
 
     setLoading(true)
     try {
-      const users = await apiRequest<User[]>("/users")
-      if (
-        register &&
-        users.some(
-          (user) => user.username.toLowerCase() === username.toLowerCase(),
-        )
-      ) {
-        setError("That username is taken. Try another one.")
-        return
-      }
-
-      const matchedUser = register
-        ? null
-        : users.find(
-            (user) => user.username === username && user.password === password,
-          )
-      if (!register && !matchedUser) {
-        setError("Username or password is incorrect.")
-        return
-      }
-
-      const user = register
-        ? await apiRequest<User>("/users", {
-            method: "POST",
-            body: JSON.stringify({ username, password }),
-          })
-        : matchedUser!
-      localStorage.setItem(SESSION_KEY, String(user.id))
-      localStorage.setItem(SESSION_USERNAME_KEY, user.username)
+      const result = await apiRequest<{ token: string; user: User }>(
+        register ? "/auth/register" : "/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify({ username, password }),
+        },
+      )
+      localStorage.setItem(SESSION_KEY, result.token)
+      localStorage.setItem(SESSION_USERNAME_KEY, result.user.username)
       const returnTo = sessionStorage.getItem(RETURN_TO_KEY)
       sessionStorage.removeItem(RETURN_TO_KEY)
       go(!register && returnTo ? returnTo : "/home")
-    } catch {
-      setError("Couldn't reach the API. Start JSON Server and try again.")
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Couldn't reach the API. Please try again.",
+      )
     } finally {
       setLoading(false)
     }
@@ -1372,16 +1381,43 @@ function Redirect({ to, remember }: { to: string; remember?: string }) {
 
 export default function App() {
   const [route, setRoute] = useState(getAppRoute(window.location.pathname))
+  const [user, setUser] = useState<User | null>(null)
   const [database, setDatabase] = useState<Database>(emptyDatabase)
-  const [loading, setLoading] = useState(!IS_STATIC_PREVIEW)
+  const [loading, setLoading] = useState(Boolean(localStorage.getItem(SESSION_KEY)))
   const [apiError, setApiError] = useState("")
   const refreshDatabase = async () => {
+    const token = localStorage.getItem(SESSION_KEY)
+    if (!token) {
+      setUser(null)
+      setDatabase(emptyDatabase)
+      setApiError("")
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setApiError("")
     try {
-      setDatabase(await readDatabase())
-    } catch {
-      setApiError("Couldn't connect to JSON Server. Start it and retry.")
+      const [currentUser, currentDatabase] = await Promise.all([
+        apiRequest<User>("/auth/me"),
+        readDatabase(),
+      ])
+      setUser(currentUser)
+      localStorage.setItem(SESSION_USERNAME_KEY, currentUser.username)
+      setDatabase(currentDatabase)
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 401) {
+        localStorage.removeItem(SESSION_KEY)
+        localStorage.removeItem(SESSION_USERNAME_KEY)
+        setUser(null)
+        setDatabase(emptyDatabase)
+        setApiError("")
+        return
+      }
+      setApiError(
+        error instanceof Error
+          ? error.message
+          : "Couldn't connect to the API. Please retry.",
+      )
     } finally {
       setLoading(false)
     }
@@ -1389,13 +1425,12 @@ export default function App() {
   useEffect(() => {
     const update = () => {
       setRoute(getAppRoute(window.location.pathname))
-      if (!IS_STATIC_PREVIEW) void refreshDatabase()
+      void refreshDatabase()
     }
-    if (!IS_STATIC_PREVIEW) void refreshDatabase()
+    void refreshDatabase()
     window.addEventListener("popstate", update)
     return () => window.removeEventListener("popstate", update)
   }, [])
-  const user = getSessionUser(database)
   const isProtected =
     route === "/home" ||
     route === "/jobs/new" ||
@@ -1448,7 +1483,7 @@ export default function App() {
           if (job.userId !== user!.id) return
           const created = await apiRequest<Job>("/jobs", {
             method: "POST",
-            body: JSON.stringify(job),
+            body: JSON.stringify(toJobPayload(job)),
           })
           setDatabase((current) => ({
             ...current,
@@ -1472,7 +1507,7 @@ export default function App() {
           if (updated.userId !== user!.id) return
           const saved = await apiRequest<Job>(`/jobs/${updated.id}`, {
             method: "PATCH",
-            body: JSON.stringify(updated),
+            body: JSON.stringify(toJobPayload(updated)),
           })
           setDatabase((current) => ({
             ...current,

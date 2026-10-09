@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: foothold-api
+    runtime: node
+    plan: free
+    buildCommand: corepack pnpm install --frozen-lockfile
+    startCommand: corepack pnpm start:api
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: foothold-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_ORIGIN
+        value: https://waltermakhado.github.io
+      - key: NODE_ENV
+        value: production
+
+databases:
+  - name: foothold-db
+    plan: free
+    databaseName: foothold
+    user: foothold

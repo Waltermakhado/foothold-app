@@ -7,31 +7,44 @@ Foothold is a job application tracker for recording applications, keeping compan
 - **Website:** [https://waltermakhado.github.io/foothold-app/](https://waltermakhado.github.io/foothold-app/)
 - **Source code:** [https://github.com/Waltermakhado/foothold-app](https://github.com/Waltermakhado/foothold-app)
 
-The website is a static GitHub Pages preview. The landing page is available there, but login, registration, and application data need the API described below; that API is not hosted on GitHub Pages yet.
+The frontend is hosted on GitHub Pages. The repository includes a Render Blueprint for a secure API and PostgreSQL database. Sign-in and application data will work on the public website once the Render service is created and its URL is added to the GitHub Actions variable described below.
 
 ## Database and API
 
-During local development, the app uses **JSON Server** as a lightweight REST API and `db.json` as its file-based data store. It provides `/users` and `/jobs` endpoints at `http://localhost:3001`.
+The API stores accounts and applications in PostgreSQL. Passwords are hashed by the API, and each request for application data is scoped to the signed-in account. The frontend receives short-lived signed access tokens; it never reads the user table or password hashes. Existing records in a local `db.json` are not automatically migrated; create a new account on the hosted service.
 
-The real `db.json` is intentionally excluded from Git because it can contain account credentials and personal application records. To create a clean local database, copy the empty template and start both the frontend and API:
+### Deploy the API
+
+1. In Render, choose **New + → Blueprint** and connect this repository. Render reads `render.yaml` to create the API service and PostgreSQL database.
+2. Wait for the `foothold-api` service to finish deploying. Its health endpoint is `/health`.
+3. In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables** and add `VITE_API_URL` with the service's public URL, without a trailing slash (for example, `https://foothold-api.onrender.com`).
+4. Run the **Deploy website** workflow from **Actions**, or push a change to `main`. The Pages build will include the API URL.
+
+The frontend API URL is a public endpoint, not a secret. Do not put database credentials, signing secrets, or passwords in GitHub Pages variables or source code. Render generates the API signing secret and keeps the database connection private. Check Render's current free-plan limits and database retention before relying on it for long-term data storage.
+
+### Run locally
+
+For local API development, set `DATABASE_URL` and `JWT_SECRET` in an untracked `.env` file using a local PostgreSQL instance, then run:
 
 ```sh
-Copy-Item db.example.json db.json
 npm install
-npm run dev:full
+npm run start:api
 ```
 
-On macOS or Linux, use `cp db.example.json db.json` instead of `Copy-Item`. Then open the local URL printed by Vite. Keep personal data in your local `db.json`; do not commit it.
-
-JSON Server and a local JSON file are suitable for development and demonstration, not for production accounts or a publicly hosted service. A production deployment needs a separately hosted API and persistent database.
-
-## Development
-
-Requirements: Node.js and npm.
+In a second terminal, start the Vite frontend:
 
 ```sh
-npm install
+npm run dev
+```
+
+The API defaults to `http://localhost:3001`. The GitHub Pages build gets its API URL from the `VITE_API_URL` Actions variable; local Vite development uses `http://localhost:3001` by default.
+
+The old local `db.json` is excluded from Git and is not used by the hosted service. Its existing accounts and applications remain local; register a fresh account on the hosted service.
+
+## Build
+
+```sh
 npm run build
 ```
 
-The GitHub Pages site is rebuilt and deployed automatically when changes are pushed to the `main` branch.
+The GitHub Pages site is rebuilt and deployed automatically when changes are pushed to `main`.
